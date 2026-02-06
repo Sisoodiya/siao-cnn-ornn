@@ -1,0 +1,47 @@
+[project]
+name = "siao-cnn-ornn"
+version = "0.1.0"
+description = "SIAO-CNN-ORNN: Nuclear Reactor Fault Detection using Self-Improved Aquila Optimizer"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "Abhay Singh Sisoodiya"}
+]
+keywords = ["deep-learning", "fault-detection", "nuclear-reactor", "cnn", "rnn", "optimization"]
+
+dependencies = [
+    "torch>=2.0.0",
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+    "scipy>=1.10.0",
+    "scikit-learn>=1.2.0",
+    "matplotlib>=3.7.0",
+    "openpyxl>=3.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+notebook = [
+    "jupyter>=1.0.0",
+    "ipykernel>=6.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["stage1_data", "stage2_features", "stage3_models", "stage4_optimizers", "stage5_inference"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.black]
+line-length = 100
+target-version = ["py39"]
