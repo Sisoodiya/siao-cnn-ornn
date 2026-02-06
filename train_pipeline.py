@@ -23,19 +23,23 @@ logger = logging.getLogger(__name__)
 
 def run_complete_pipeline(
     data_dir: str = 'data/',
-    window_size: int = 100, # Increased from 50 to match specs
+    window_size: int = 100,
     stride: int = 25,
-    cnn_embedding_dim: int = 256,
-    wks_dim: int = 43,  # WKS features dimension (num signals)
-    rnn_hidden_size: int = 128,
+    cnn_embedding_dim: int = 256,  # Optuna: 256
+    wks_dim: int = 43,
+    rnn_hidden_size: int = 224,  # Optuna optimized (was 128)
+    rnn_num_layers: int = 2,  # Optuna optimized (was 1)
     num_classes: int = 6,
     test_size: float = 0.2,
     wks_pop_size: int = 15,
     wks_max_iter: int = 30,
-    siao_pop_size: int = 20,
-    siao_max_iter: int = 50,
-    bp_epochs: int = 100,  # Scaled to match iteration count
-    batch_size: int = 163, # Updated to 163 as per research specs
+    siao_pop_size: int = 25,  # Optuna optimized (was 20)
+    siao_max_iter: int = 40,  # Optuna optimized (was 50)
+    bp_epochs: int = 100,
+    bp_lr: float = 0.00157,  # Optuna optimized (was 0.001)
+    fc_dropout: float = 0.164,  # Optuna optimized (was 0.2)
+    weight_decay: float = 1.97e-05,  # Optuna optimized (was 1e-5)
+    batch_size: int = 163,
     use_class_weights: bool = True
 ) -> Dict:
     """
@@ -200,7 +204,7 @@ def run_complete_pipeline(
         ornn = ORNN(
             input_size=combined_input_size,
             hidden_size=rnn_hidden_size,
-            num_layers=1,
+            num_layers=rnn_num_layers,  # Now uses function parameter
             cell_type='gru'
         )
         
@@ -211,10 +215,10 @@ def run_complete_pipeline(
             siao_pop_size=siao_pop_size,
             siao_max_iter=siao_max_iter,
             bp_epochs=bp_epochs,
-            bp_lr=0.001,
+            bp_lr=bp_lr,  # Now uses function parameter
             weight_bounds=(-1.0, 1.0),
-            fc_dropout=0.2,
-            weight_decay=1e-5,
+            fc_dropout=fc_dropout,  # Now uses function parameter
+            weight_decay=weight_decay,  # Now uses function parameter
             patience=20
         )
         
@@ -302,7 +306,7 @@ def run_complete_pipeline(
 
 def quick_start():
     """
-    Quick start with default parameters.
+    Quick start with Optuna-optimized parameters.
     
     Usage in Colab:
         from train_pipeline import quick_start
@@ -310,18 +314,22 @@ def quick_start():
     """
     return run_complete_pipeline(
         data_dir='data/',
-        window_size=100, # Updated to 100
+        window_size=100,
         stride=25,
         cnn_embedding_dim=256,
         wks_dim=43,
-        rnn_hidden_size=128,
+        rnn_hidden_size=224,  # Optuna optimized
+        rnn_num_layers=2,  # Optuna optimized
         num_classes=6,
-        test_size=0.2, # Still used for fallback if needed, but CV overrides logic
+        test_size=0.2,
         wks_pop_size=15,
         wks_max_iter=30,
-        siao_pop_size=15,
-        siao_max_iter=30,
+        siao_pop_size=25,  # Optuna optimized
+        siao_max_iter=40,  # Optuna optimized
         bp_epochs=100,
+        bp_lr=0.00157,  # Optuna optimized
+        fc_dropout=0.164,  # Optuna optimized
+        weight_decay=1.97e-05,  # Optuna optimized
         batch_size=163
     )
 
@@ -331,8 +339,31 @@ def quick_start():
 # =============================================================================
 
 if __name__ == '__main__':
+    import argparse
+    
+    parser = argparse.ArgumentParser(
+        description='SIAO-CNN-ORNN Complete Training Pipeline'
+    )
+    parser.add_argument(
+        '--augment', action='store_true',
+        help='Use TimeGAN-augmented data (run run_augmentation.py first)'
+    )
+    parser.add_argument(
+        '--folds', type=int, default=5,
+        help='Number of cross-validation folds (default: 5)'
+    )
+    parser.add_argument(
+        '--epochs', type=int, default=100,
+        help='Number of training epochs (default: 100)'
+    )
+    
+    args = parser.parse_args()
+    
     print("SIAO-CNN-ORNN Complete Training Pipeline")
     print("=" * 60)
+    
+    if args.augment:
+        print("[+] Using TimeGAN-augmented data")
     
     results = quick_start()
     
