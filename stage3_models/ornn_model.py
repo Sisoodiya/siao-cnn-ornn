@@ -492,7 +492,7 @@ class SIAOORNNTrainer:
         Returns:
             Optimized weight vector
         """
-        from siao_optimizer import SelfImprovedAquilaOptimizer
+        from stage4_optimizers.siao_optimizer import SelfImprovedAquilaOptimizer
         
         logger.info("=" * 60)
         logger.info("Starting SIAO Weight Optimization for ORNN")
