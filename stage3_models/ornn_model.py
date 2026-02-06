@@ -17,16 +17,21 @@ Author: Recurrent Neural Network Specialist
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
+import torch.optim as optim
 import numpy as np
-from typing import Tuple, Optional, List, Dict, Callable
+import matplotlib.pyplot as plt
+from typing import Dict, List, Tuple, Optional, Callable
 import logging
+from tqdm import tqdm, trange
+from rich.console import Console
 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
+# Use Console instead of standard logger for visual consistency
+console = Console()
 logger = logging.getLogger(__name__)
 
 
@@ -422,7 +427,10 @@ class SIAOORNNTrainer:
         siao_max_iter: int = 50,
         bp_epochs: int = 100,
         bp_lr: float = 0.001,
-        weight_bounds: Tuple[float, float] = (-1.0, 1.0)
+        weight_bounds: Tuple[float, float] = (-1.0, 1.0),
+        fc_dropout: float = 0.5,
+        weight_decay: float = 1e-4,
+        patience: Optional[int] = 20
     ):
         """
         Initialize trainer.
@@ -446,7 +454,19 @@ class SIAOORNNTrainer:
         self.weight_bounds = weight_bounds
         
         # Output layer
-        self.fc = nn.Linear(ornn.get_output_size(), output_size).to(device)
+        self.bp_lr = bp_lr
+        self.weight_bounds = weight_bounds
+        self.weight_decay = weight_decay
+        self.patience = patience
+        
+        # Output layer with Dropout
+        self.fc = nn.Sequential(
+            nn.Dropout(fc_dropout) if fc_dropout > 0 else nn.Identity(),
+            nn.Linear(ornn.get_output_size(), output_size)
+        ).to(device)
+        
+        # Loss function (default, can be overridden)
+        self.criterion = nn.CrossEntropyLoss()
         
         # Track training history
         self.siao_history = []
@@ -471,7 +491,7 @@ class SIAOORNNTrainer:
                 logits = self.fc(last_hidden)
                 
                 # Compute loss
-                loss = F.cross_entropy(logits, y)
+                loss = self.criterion(logits, y)
             
             return loss.item()
         
@@ -552,14 +572,29 @@ class SIAOORNNTrainer:
         
         # Combine parameters
         params = list(self.ornn.parameters()) + list(self.fc.parameters())
-        optimizer = optim.Adam(params, lr=self.bp_lr)
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', factor=0.5, patience=10
+        optimizer = optim.Adam(params, lr=self.bp_lr, weight_decay=self.weight_decay)
+        # Change to StepLR as per requested specs
+        # Scaled step_size to 40 to match research paper's iteration count (125 iters)
+        scheduler = torch.optim.lr_scheduler.StepLR(
+            optimizer, step_size=40, gamma=0.2
         )
         
-        history = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
+        history = {
+            'train_loss': [], 'train_acc': [],
+            'val_loss': [], 'val_acc': []
+        }
         
-        for epoch in range(self.bp_epochs):
+        # Early Stopping Variables
+        best_val_loss = float('inf')
+        patience_counter = 0
+        best_model_state = None
+        
+        console.print(f"[bold]Starting Grid Search / Backprop finetuning for {self.bp_epochs} epochs...[/bold]")
+        
+        # Use trange for epoch progress
+        epoch_pbar = trange(self.bp_epochs, desc="Training Epochs", leave=True)
+        
+        for epoch in epoch_pbar:
             # Training
             self.ornn.train()
             self.fc.train()
@@ -568,7 +603,10 @@ class SIAOORNNTrainer:
             correct = 0
             total = 0
             
-            for X_batch, y_batch in train_loader:
+            # Use tqdm for batch progress
+            batch_pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}", leave=False, total=len(train_loader))
+            
+            for X_batch, y_batch in batch_pbar:
                 X_batch = X_batch.to(self.device)
                 y_batch = y_batch.to(self.device)
                 
@@ -579,7 +617,7 @@ class SIAOORNNTrainer:
                 last_hidden = output[:, -1, :]
                 logits = self.fc(last_hidden)
                 
-                loss = F.cross_entropy(logits, y_batch)
+                loss = self.criterion(logits, y_batch)
                 
                 # Backward
                 loss.backward()
@@ -590,6 +628,9 @@ class SIAOORNNTrainer:
                 _, predicted = logits.max(1)
                 correct += predicted.eq(y_batch).sum().item()
                 total += y_batch.size(0)
+                
+                # Update batch pbar
+                batch_pbar.set_postfix({'loss': f"{loss.item():.4f}"})
             
             train_loss = epoch_loss / len(train_loader)
             train_acc = correct / total
@@ -597,18 +638,57 @@ class SIAOORNNTrainer:
             history['train_acc'].append(train_acc)
             
             # Validation
+            val_loss = 0.0
+            val_acc = 0.0
             if val_loader:
                 val_loss, val_acc = self._evaluate(val_loader)
                 history['val_loss'].append(val_loss)
                 history['val_acc'].append(val_acc)
-                scheduler.step(val_loss)
             
-            if (epoch + 1) % 10 == 0 or epoch == 0:
-                msg = f"Epoch {epoch+1}/{self.bp_epochs}: Loss={train_loss:.4f}, Acc={train_acc:.4f}"
-                if val_loader:
-                    msg += f", Val_Loss={val_loss:.4f}, Val_Acc={val_acc:.4f}"
-                logger.info(msg)
+            # Scheduler step (StepLR steps at the end of epoch, not dependent on validation metric)
+            scheduler.step()
+            
+            # Early Stopping Check
+            if self.patience is not None and val_loader: # Only apply if patience is set and validation data is provided
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    patience_counter = 0
+                    # Save best model state
+                    best_model_state = {
+                        'ornn': self.ornn.state_dict(),
+                        'fc': self.fc.state_dict()
+                    }
+                else:
+                    patience_counter += 1
+                    if patience_counter >= self.patience:
+                        console.print(f"[bold yellow]Early stopping triggered at epoch {epoch+1}[/bold yellow]")
+                        # Restore best model
+                        if best_model_state:
+                            self.ornn.load_state_dict(best_model_state['ornn'])
+                            self.fc.load_state_dict(best_model_state['fc'])
+                        break # Exit the training loop
+            
+            # Update epoch description
+            epoch_pbar.set_description(f"Epoch {epoch+1} | Loss: {train_loss:.4f} | Acc: {train_acc:.4f} | Val Acc: {val_acc:.4f}")
+            
+            if (epoch + 1) % 50 == 0:
+                 # Minimal logging to console to keep history
+                 logger.info(f"Epoch {epoch+1}: Train Acc={train_acc:.4f}, Val Acc={val_acc:.4f}")
         
+        # If training finished without early stopping, and early stopping was enabled,
+        # restore the best model if it was better than the final model.
+        # This ensures we always return the model with the best validation performance.
+        if self.patience is not None and val_loader and best_model_state and patience_counter < self.patience:
+             # This condition means the loop completed, but we still want the best model found
+             # if the last epoch wasn't the best.
+             # The `break` above handles the case where patience ran out.
+             # If the loop finished naturally, `best_model_state` would hold the best.
+             # If the last epoch was the best, `best_model_state` would be the current state.
+             # So, simply restoring `best_model_state` is generally the right approach.
+             self.ornn.load_state_dict(best_model_state['ornn'])
+             self.fc.load_state_dict(best_model_state['fc'])
+             console.print(f"[bold green]Restored best model based on validation loss.[/bold green]")
+
         self.bp_history = history
         return history
     
@@ -630,7 +710,7 @@ class SIAOORNNTrainer:
                 last_hidden = output[:, -1, :]
                 logits = self.fc(last_hidden)
                 
-                loss = F.cross_entropy(logits, y_batch)
+                loss = self.criterion(logits, y_batch)
                 total_loss += loss.item()
                 
                 _, predicted = logits.max(1)

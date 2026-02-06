@@ -419,17 +419,21 @@ class IP200DataPipeline:
         if not unique_labels.issubset(valid_labels):
             logger.warning(f"Invalid labels found: {unique_labels - valid_labels}")
         
-        logger.info(f"✅ Shape validation passed: X={X.shape}, y={y.shape}")
+        logger.info(f" Shape validation passed: X={X.shape}, y={y.shape}")
     
     # -------------------------------------------------------------------------
     # Main Pipeline
     # -------------------------------------------------------------------------
     
+        return X, y
+    
     def run(
         self,
         subdirs: Optional[List[str]] = None,
         file_pattern: str = '*.xlsx',
-        pad_to_length: Optional[int] = None
+        pad_to_length: Optional[int] = None,
+        use_cache: bool = True,
+        cache_dir: str = 'data/processed/'
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Run the complete data ingestion pipeline.
@@ -438,6 +442,8 @@ class IP200DataPipeline:
             subdirs: Specific subdirectories to process
             file_pattern: Glob pattern for data files
             pad_to_length: Pad all samples to this length
+            use_cache: Whether to use cached .npy files
+            cache_dir: Directory for cache files
         
         Returns:
             X: numpy array [samples, time_steps, features]
@@ -446,6 +452,21 @@ class IP200DataPipeline:
         logger.info("=" * 60)
         logger.info("Starting IP-200 Data Ingestion Pipeline")
         logger.info("=" * 60)
+        
+        # Check cache
+        cache_path = Path(cache_dir)
+        x_cache = cache_path / 'X.npy'
+        y_cache = cache_path / 'y.npy'
+        
+        if use_cache and x_cache.exists() and y_cache.exists():
+            logger.info(f"Loading cached data from {cache_dir}")
+            try:
+                X = np.load(x_cache)
+                y = np.load(y_cache)
+                logger.info(f"Loaded cached tensors: X={X.shape}, y={y.shape}")
+                return X, y
+            except Exception as e:
+                logger.warning(f"Failed to load cache: {e}. Proceeding with full ingestion.")
         
         # Step 1: Load all data
         dataframes, labels = self.load_all_data(subdirs, file_pattern)
@@ -464,6 +485,10 @@ class IP200DataPipeline:
         # Step 3: Create output tensors
         X, y = self.create_tensors(processed_dfs, labels, pad_to_length)
         
+        # Save cache
+        if use_cache:
+            self.save_tensors(X, y, output_dir=cache_dir)
+            
         logger.info("=" * 60)
         logger.info("Pipeline Complete!")
         logger.info(f"  Output X shape: {X.shape}")

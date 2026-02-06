@@ -230,7 +230,7 @@ class StatisticalFeatureExtractor:
         logger.info(f"Output shape: {features.shape}")
         logger.info(f"Features per signal: {self.NUM_FEATURES_PER_SIGNAL}")
         logger.info(f"Total features: {features.shape[1]}")
-        logger.info("✅ Feature extraction validation passed")
+        logger.info("Feature extraction validation passed")
     
     def get_feature_names(self, signal_names: Optional[List[str]] = None) -> List[str]:
         """

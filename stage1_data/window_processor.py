@@ -228,7 +228,7 @@ class SlidingWindowProcessor:
         for label, count in zip(unique_labels, counts):
             logger.info(f"  Class {label}: {count} windows")
         
-        logger.info("✅ Output validation passed")
+        logger.info("Output validation passed")
     
     def get_window_indices(
         self,
