@@ -1,20 +1,33 @@
 """
-Stage 0: TimeGAN Data Augmentation Module
+Stage 0: Data Augmentation Module
 
-Generates synthetic time-series data using TimeGAN to augment
-the IP-200 reactor dataset from ~81 samples to 600+ samples.
+Contains TimeGAN-based synthetic data generation
+and quality validation utilities for expanding limited NPP datasets.
 """
 
 from .time_gan_augmentor import TimeGANAugmentor
 from .quality_metrics import (
+    plot_pca_comparison,
     calculate_discriminative_score,
     calculate_predictive_score,
-    plot_pca_comparison
+    validate_synthetic_data
+)
+from .mixup import (
+    MixupAugmentor,
+    CutmixAugmentor,
+    mixup_criterion,
+    blend_real_synthetic
 )
 
 __all__ = [
     'TimeGANAugmentor',
-    'calculate_discriminative_score',
+    'plot_pca_comparison',
+    'calculate_discriminative_score', 
     'calculate_predictive_score',
-    'plot_pca_comparison'
+    'validate_synthetic_data',
+    'MixupAugmentor',
+    'CutmixAugmentor',
+    'mixup_criterion',
+    'blend_real_synthetic'
 ]
+

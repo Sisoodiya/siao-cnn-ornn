@@ -26,12 +26,12 @@ def main():
         description='Generate synthetic data using TimeGAN'
     )
     parser.add_argument(
-        '--epochs', type=int, default=1000,
-        help='Number of training epochs for TimeGAN (default: 1000)'
+        '--epochs', type=int, default=5000,
+        help='Number of training epochs for TimeGAN (default: 5000 for better quality)'
     )
     parser.add_argument(
-        '--target-per-class', type=int, default=100,
-        help='Target samples per class (default: 100, total ~600)'
+        '--target-per-class', type=int, default=50,
+        help='Target samples per class (default: 50, reduced for better quality)'
     )
     parser.add_argument(
         '--batch-size', type=int, default=16,
@@ -77,7 +77,7 @@ def main():
     print_header("Step 1: Loading Original Data")
     
     from stage1_data.data_pipeline import IP200DataPipeline
-    from stage1_data.window_processor import WindowProcessor
+    from stage1_data.window_processor import SlidingWindowProcessor
     
     # Load data
     pipeline = IP200DataPipeline(data_dir=args.data_dir)
@@ -87,8 +87,8 @@ def main():
     logger.info(f"Shape: {X_raw.shape}")
     
     # Create windows
-    processor = WindowProcessor(window_size=100, stride=25)
-    X_windows, y_windows = processor.create_windows(X_raw, y_raw)
+    processor = SlidingWindowProcessor(window_size=100, stride=25)
+    X_windows, y_windows = processor.transform(X_raw, y_raw)
     
     logger.info(f"Created {len(X_windows)} windows")
     

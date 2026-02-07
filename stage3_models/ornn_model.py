@@ -255,6 +255,61 @@ class OGRUCell(nn.Module):
 
 
 # =============================================================================
+# Self-Attention Layer
+# =============================================================================
+
+class SelfAttention(nn.Module):
+    """
+    Self-attention mechanism for time-series.
+    
+    Computes attention weights across the sequence dimension
+    to focus on important timesteps.
+    """
+    
+    def __init__(self, hidden_size: int, num_heads: int = 4):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.num_heads = num_heads
+        self.head_dim = hidden_size // num_heads
+        
+        assert hidden_size % num_heads == 0, "hidden_size must be divisible by num_heads"
+        
+        self.query = nn.Linear(hidden_size, hidden_size)
+        self.key = nn.Linear(hidden_size, hidden_size)
+        self.value = nn.Linear(hidden_size, hidden_size)
+        self.out = nn.Linear(hidden_size, hidden_size)
+        
+        self.scale = self.head_dim ** -0.5
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Apply self-attention.
+        
+        Args:
+            x: Input [batch, seq_len, hidden_size]
+            
+        Returns:
+            Attended output [batch, seq_len, hidden_size]
+        """
+        batch, seq_len, _ = x.size()
+        
+        # Compute Q, K, V
+        Q = self.query(x).view(batch, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        K = self.key(x).view(batch, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        V = self.value(x).view(batch, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        
+        # Attention scores
+        scores = torch.matmul(Q, K.transpose(-2, -1)) * self.scale
+        attn = torch.softmax(scores, dim=-1)
+        
+        # Apply attention
+        out = torch.matmul(attn, V)
+        out = out.transpose(1, 2).contiguous().view(batch, seq_len, self.hidden_size)
+        
+        return self.out(out)
+
+
+# =============================================================================
 # Optimized RNN (ORNN) Module
 # =============================================================================
 
@@ -408,8 +463,121 @@ class ORNN(nn.Module):
 
 
 # =============================================================================
+# Enhanced ORNN with Attention
+# =============================================================================
+
+class EnhancedORNN(nn.Module):
+    """
+    Enhanced ORNN with self-attention and layer normalization.
+    
+    Combines:
+    - Bidirectional GRU layers
+    - Self-attention mechanism
+    - Layer normalization
+    - Residual connections
+    """
+    
+    def __init__(
+        self,
+        input_size: int,
+        hidden_size: int = 256,
+        num_layers: int = 3,
+        cell_type: str = 'gru',
+        dropout: float = 0.1,
+        use_attention: bool = True,
+        bidirectional: bool = True,
+        num_heads: int = 4
+    ):
+        super().__init__()
+        
+        self.hidden_size = hidden_size
+        self.use_attention = use_attention
+        self.bidirectional = bidirectional
+        self.num_directions = 2 if bidirectional else 1
+        
+        # Base ORNN
+        self.ornn = ORNN(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            cell_type=cell_type,
+            dropout=dropout,
+            bidirectional=bidirectional
+        )
+        
+        # Layer normalization
+        output_size = hidden_size * self.num_directions
+        self.layer_norm = nn.LayerNorm(output_size)
+        
+        # Self-attention (if enabled)
+        if use_attention:
+            self.attention = SelfAttention(output_size, num_heads=num_heads)
+            self.attention_norm = nn.LayerNorm(output_size)
+        
+        # Projection if using residual
+        if input_size != output_size:
+            self.input_proj = nn.Linear(input_size, output_size)
+        else:
+            self.input_proj = nn.Identity()
+        
+        self.dropout = nn.Dropout(dropout)
+        
+        logger.info(f"EnhancedORNN: hidden={hidden_size}, layers={num_layers}, "
+                   f"bidir={bidirectional}, attention={use_attention}")
+    
+    def forward(
+        self,
+        x: torch.Tensor,
+        h_0: Optional[torch.Tensor] = None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Forward pass with attention and residual connections.
+        
+        Args:
+            x: Input [batch, seq_len, input_size]
+            h_0: Optional initial hidden state
+            
+        Returns:
+            output: Sequence output [batch, seq_len, hidden_size * num_directions]
+            h_n: Final hidden state
+        """
+        # Project input for residual connection
+        residual = self.input_proj(x)
+        
+        # ORNN forward
+        output, h_n = self.ornn(x, h_0)
+        
+        # Layer norm + residual
+        output = self.layer_norm(output + residual)
+        
+        # Self-attention
+        if self.use_attention:
+            attn_out = self.attention(output)
+            output = self.attention_norm(output + self.dropout(attn_out))
+        
+        return output, h_n
+    
+    def get_output_size(self) -> int:
+        """Return output feature size."""
+        return self.hidden_size * self.num_directions
+    
+    def get_weight_vector(self) -> np.ndarray:
+        """Get ORNN weights for SIAO optimization."""
+        return self.ornn.get_weight_vector()
+    
+    def set_weight_vector(self, weights: np.ndarray, device: torch.device):
+        """Set ORNN weights from SIAO."""
+        self.ornn.set_weight_vector(weights, device)
+    
+    def get_weight_dim(self) -> int:
+        """Get weight dimension for SIAO."""
+        return self.ornn.get_weight_dim()
+
+
+# =============================================================================
 # SIAO-Optimized RNN Trainer
 # =============================================================================
+
 
 class SIAOORNNTrainer:
     """

@@ -349,6 +349,18 @@ if __name__ == '__main__':
         help='Use TimeGAN-augmented data (run run_augmentation.py first)'
     )
     parser.add_argument(
+        '--mixup', action='store_true',
+        help='Enable mixup augmentation during training'
+    )
+    parser.add_argument(
+        '--synth-ratio', type=float, default=0.3,
+        help='Ratio of synthetic data to use (0.0-1.0, default: 0.3)'
+    )
+    parser.add_argument(
+        '--nppad', action='store_true',
+        help='Include NPPAD dataset for additional training samples'
+    )
+    parser.add_argument(
         '--folds', type=int, default=5,
         help='Number of cross-validation folds (default: 5)'
     )
@@ -362,11 +374,36 @@ if __name__ == '__main__':
     print("SIAO-CNN-ORNN Complete Training Pipeline")
     print("=" * 60)
     
+    if args.nppad:
+        print("[+] Including NPPAD dataset")
+        from stage1_data.nppad_loader import NPPADLoader
+        nppad_loader = NPPADLoader()
+        X_nppad, y_nppad = nppad_loader.load()
+        print(f"    Loaded {len(X_nppad)} NPPAD samples")
+    
     if args.augment:
-        print("[+] Using TimeGAN-augmented data")
+        print(f"[+] Using TimeGAN-augmented data (synth_ratio={args.synth_ratio})")
+        # Load augmented data and blend with controlled ratio
+        from pathlib import Path
+        import numpy as np
+        from stage0_augmentation import blend_real_synthetic
+        
+        aug_dir = Path('data/augmented')
+        if (aug_dir / 'X_augmented.npy').exists():
+            X_synth = np.load(aug_dir / 'X_augmented.npy')
+            y_synth = np.load(aug_dir / 'y_augmented.npy')
+            print(f"    Loaded {len(X_synth)} synthetic samples")
+        else:
+            print("[!] No augmented data found. Run run_augmentation.py first.")
+            args.augment = False
+    
+    if args.mixup:
+        print("[+] Mixup augmentation enabled")
     
     results = quick_start()
     
     print("\n" + "=" * 60)
     print("Training Complete!")
     print(f"Final Average Accuracy: {results['avg_accuracy']:.4f}")
+
+
